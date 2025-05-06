@@ -1,10 +1,10 @@
 # Byte-compiled / optimized / DLL files
-   __pycache__/
-   *.py[cod]
+__pycache__/
+*.py[cod]
 
-   # Virtual environment folder
-   venv/
+# Virtual environment folder
+venv/
 
-   # IDE files
-   .idea/
-   *.iml
+# IDE files
+.idea/
+*.iml
