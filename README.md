@@ -3,6 +3,7 @@
 Magic The Gathering Base
 
 Creating a DB of all the existing cards in Magic The Gathering.
+The DB will be created in postgresql
 This DB will contain:
 - Name
 - Mana cost
@@ -21,3 +22,5 @@ This DB will contain:
 - Price
 
 Finally the total value of a deck will be determined
+
+Players own certain decks / cards
