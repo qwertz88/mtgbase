@@ -1,5 +1,4 @@
 # mtgbase
-## Project Description
 Magic The Gathering Base
 
 Creating a DB of all the existing cards in Magic The Gathering.
