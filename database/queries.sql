@@ -28,25 +28,25 @@ create table if not exists tbl_card_prices (
 
 
 create table if not exists tbl_players (
-    player_id serial primary key,
-    player_lastname varchar(50) not null,
-	player_firstname varchar(50) not null
+    player_id           serial primary key,
+    player_lastname     varchar(50) not null,
+	player_firstname    varchar(50) not null
 );
 
 
 create table if not exists tbl_decks (
-    deck_id serial primary key,
-    deck_name varchar(100) not null,
-    player_id integer not null,
+    deck_id     serial primary key,
+    deck_name   varchar(100) not null,
+    player_id   integer not null,
     foreign key (player_id) references tbl_players(player_id) on delete cascade
 );
 
 
 create table if not exists tbl_deck_cards (
-    deck_card_id serial primary key,
-    deck_id integer not null,
-    card_id integer not null,
-    quantity integer not null default 1,  -- Number of this card in the deck
+    deck_card_id    serial primary key,
+    deck_id         integer not null,
+    card_id         integer not null,
+    quantity        integer not null default 1,  -- Number of this card in the deck
     foreign key (deck_id) references tbl_decks(deck_id) on delete cascade,
     foreign key (card_id) references tbl_cards(card_id) on delete cascade,
     unique (deck_id, card_id) -- optional: prevent duplicate entries in one deck
