@@ -35,18 +35,24 @@ class CardSchema(Schema):
     card_image_url = fields.Method("get_image_url")
 
     # Optional field if you want to store triggered abilities or similar separately
-    card_ability = fields.Str(load_default=None)
+    card_ability = fields.Str(data_key="originalText", load_default=None)
+
+    # Dummy price field (0.0 for now)
+    card_price = fields.Float(load_default=0.0)
 
     # --- Custom Field Methods ---
 
     def get_subtype(self, obj):
         """
-        Extracts the subtype from the 'type' field, if it exists.
-        Example: "Legendary Creature — Snake Samurai" → "Snake Samurai"
+        Extracts the subtypes from the 'type' field, if it exists.
+        Example: "Legendary Creature — Snake Samurai" → "Snake, Samurai"
         """
         type_line = obj.get("type", "")
         parts = type_line.split("—")
-        return parts[1].strip() if len(parts) > 1 else None
+        if len(parts) > 1:
+            subtypes = parts[1].strip().split(" ")
+            return ", ".join(subtypes)
+        return None
 
     def get_image_url(self, obj):
         """
