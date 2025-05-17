@@ -105,7 +105,7 @@ class DBManager:
 
 
 def main():
-    mtgbase="mtgbase"
+    mtgbase="mtgbase2"
     postgres="postgres"
     password = os.environ.get("DB_PASSWORD")
 
