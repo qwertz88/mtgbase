@@ -27,15 +27,13 @@ class DBManager:
     def get_selected_card_data(self) -> list[dict]:
         query = """
                 SELECT
-                    id,
+                    name,
                     colorIdentity,
                     colorIndicator,
                     flavorText,
                     keywords,
-                    language,
                     manaCost,
                     manavalue,
-                    name,
                     originalType,
                     power,
                     rarity,
@@ -43,6 +41,7 @@ class DBManager:
                     text,
                     toughness,
                     types,
+                    id,
                     uuid
                 FROM cards; \
                 """
@@ -55,7 +54,6 @@ class DBManager:
     def get_cards_by_name(self, text: str) -> list[dict]:
         query = """
                 SELECT DISTINCT ON (name)
-                    id,
                     name,
                     colorIdentity,
                     colorIndicator,
@@ -70,6 +68,7 @@ class DBManager:
                     text,
                     toughness,
                     types,
+                    id,
                     uuid
                 FROM cards
                 WHERE name ILIKE %s
@@ -131,7 +130,7 @@ def all_cards_name():
         password=password
     )
 
-    cards = db.get_cards_by_name("drudge")
+    cards = db.get_cards_by_name("opt")
     for card in cards:
         print(card)
     db.close()
