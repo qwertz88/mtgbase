@@ -54,8 +54,9 @@ class DBManager:
 
     def get_cards_by_name(self, text: str) -> list[dict]:
         query = """
-                SELECT
+                SELECT DISTINCT ON (name)
                     id,
+                    name,
                     colorIdentity,
                     colorIndicator,
                     flavorText,
@@ -63,7 +64,6 @@ class DBManager:
                     language,
                     manaCost,
                     manavalue,
-                    name,
                     originalType,
                     power,
                     rarity,
@@ -73,7 +73,8 @@ class DBManager:
                     types,
                     uuid
                 FROM cards
-                WHERE name ILIKE %s; \
+                WHERE name ILIKE %s
+                ORDER BY name, id; \
                 """
         param = f"%{text}%"
         with self.conn.cursor() as cur:
