@@ -1,5 +1,5 @@
 create table if not exists cards (
-	id                      SERIAL PRIMARY KEY,         --Used
+	id                      SERIAL PRIMARY KEY,
 	artist                  TEXT,
 	artistIds               TEXT,
 	asciiName               TEXT,
@@ -48,20 +48,20 @@ create table if not exists cards (
 	layout                  TEXT,
 	leadershipSkills        TEXT,
 	life                    TEXT,
-	loyalty                 TEXT,                       --Used
-	manaCost                TEXT,                       --Used
-	manaValue               FLOAT,                      --Used
-	name                    TEXT,                       --Used
+	loyalty                 TEXT,
+	manaCost                TEXT,
+	manaValue               FLOAT,
+	name                    TEXT,
 	number                  TEXT,
 	originalPrintings       TEXT,
 	originalReleaseDate     TEXT,
 	originalText            TEXT,
 	originalType            TEXT,
 	otherFaceIds            TEXT,
-	power                   TEXT,                       --Used
+	power                   TEXT,
 	printings               TEXT,
 	promoTypes              TEXT,
-	rarity                  TEXT,                       --Used
+	rarity                  TEXT,
 	rebalancedPrintings     TEXT,
 	relatedCards            TEXT,
 	securityStamp           TEXT,
@@ -70,12 +70,12 @@ create table if not exists cards (
 	signature               TEXT,
 	sourceProducts          TEXT,
 	subsets                 TEXT,
-	subtypes                TEXT,                       --Used
+	subtypes                TEXT,
 	supertypes              TEXT,
-	text                    TEXT,                       --Used
-	toughness               TEXT,                       --Used
-	type                    TEXT,                       --Used
-	types                   TEXT,                       --Used
+	text                    TEXT,
+	toughness               TEXT,
+	type                    TEXT,
+	types                   TEXT,
 	uuid                    VARCHAR(36) NOT NULL,
 	variations              TEXT,
 	watermark               TEXT
