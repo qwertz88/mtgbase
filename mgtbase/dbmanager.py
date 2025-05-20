@@ -61,7 +61,6 @@ class DBManager:
                     colorIndicator,
                     flavorText,
                     keywords,
-                    language,
                     manaCost,
                     manavalue,
                     originalType,
@@ -74,6 +73,7 @@ class DBManager:
                     uuid
                 FROM cards
                 WHERE name ILIKE %s
+                  AND language = 'English'
                 ORDER BY name, id; \
                 """
         param = f"%{text}%"
@@ -131,7 +131,7 @@ def all_cards_name():
         password=password
     )
 
-    cards = db.get_cards_by_name("opt")
+    cards = db.get_cards_by_name("drudge")
     for card in cards:
         print(card)
     db.close()
