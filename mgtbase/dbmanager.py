@@ -3,6 +3,42 @@ import psycopg2
 from card import Card
 
 class DBManager:
+    """
+    Database manager for interacting with a PostgreSQL database containing card information.
+
+    Provides methods to retrieve all cards, selected card data, and cards matching a given name
+    from the 'cards' table. Handles database connection and cleanup.
+
+    Parameters
+    ----------
+    dbname : str
+        Name of the database to connect to.
+    user : str
+        Database user name.
+    password : str
+        Password for the database user.
+    host : str, optional
+        Host address of the PostgreSQL server (default is 'localhost').
+    port : str, optional
+        Port number for the PostgreSQL server (default is '5432').
+
+    Attributes
+    ----------
+    conn : psycopg2.extensions.connection
+        Active connection to the PostgreSQL database.
+
+    Methods
+    -------
+    get_all_cards() -> list[Card]
+        Retrieve all card records and return them as a list of `Card` objects.
+    get_selected_card_data() -> list[dict]
+        Retrieve selected fields for all cards as a list of dictionaries.
+    get_cards_by_name(text: str) -> list[dict]
+        Retrieve card records matching a given name (case-insensitive, English only).
+    close()
+        Close the database connection.
+    """
+
     def __init__(self, dbname, user, password, host='localhost', port='5432'):
         self.conn = psycopg2.connect(
             dbname=dbname,
