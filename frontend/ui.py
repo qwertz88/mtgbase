@@ -114,8 +114,9 @@ def deck_view_ui(deck_name):
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"
         ),
 
-        # Choose Commander button
+        ui.input_text("commander_search_name", "Commander Name (optional before opening)", value=""),
         ui.input_action_button("choose_commander_btn", "Choose Commander", class_="btn-primary"),
+
 
         # Commander picker (if open)
         ui.output_ui("commander_search_view"),
@@ -139,8 +140,6 @@ def deck_view_ui(deck_name):
         # Card search list
         ui.output_ui("card_search_view")
     )
-
-
 
 # --- App root layout + JavaScript interactions ---
 app_ui = ui.page_fluid(

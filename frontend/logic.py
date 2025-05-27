@@ -539,12 +539,6 @@ def server(input, output, session):
             style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; align-items: start;"
         )
 
-    @reactive.effect
-    @reactive.event(input.add_commander_btn)
-    def _():
-        search_name_value.set(input.card_name())
-        show_card_search.set(True)
-
     @output
     @render.ui
     def card_search_view():
@@ -647,7 +641,7 @@ def server(input, output, session):
                 if "Legendary" in (card.get("supertypes") or []) and (
                         "Creature" in (card.get("types") or []) or
                         ("Planeswalker" in (card.get("types") or []) and "can be your commander" in (
-                                    card.get("text") or "").lower())
+                                card.get("text") or "").lower())
                 )
             ]
         elif stage == "partner":
@@ -670,52 +664,47 @@ def server(input, output, session):
             filtered = [card for card in filtered if name_filter in card["name"].lower()]
 
         return ui.div(
-            ui.input_text("commander_search_name", "Filter by name", value=commander_search_name.get()),
             render_card_list(filtered, add_button_class="add-commander-choice")
         )
-
-    @reactive.effect
-    @reactive.event(input.commander_choice)
-    def handle_commander_selection():
-        card_name = input.commander_choice()
-        user = session_user.get()
-        deck = active_deck.get()
-        if not (user and deck and card_name):
-            return
-
-        decks = load_decks(user)
-        deck_data = decks.get(deck, {})
-        commander_cards = deck_data.get("commander", [])
-        card = find_card_by_name(card_name)
-
-        if not card:
-            return
-
-        if not commander_cards:
-            commander_cards.append(card)
-            if "background" in (card.get("text") or "").lower():
-                choose_commander_stage.set("background")
-            elif "partner" in (card.get("text") or "").lower():
-                choose_commander_stage.set("partner")
-            else:
-                choose_commander_stage.set("closed")
-        elif len(commander_cards) == 1:
-            first = commander_cards[0]
-            if "background" in (first.get("text") or "").lower() and "Enchantment" in (card.get("types") or []):
-                commander_cards.append(card)
-                choose_commander_stage.set("closed")
-            elif "partner" in (first.get("text") or "").lower() and "partner" in (card.get("text") or "").lower():
-                commander_cards.append(card)
-                choose_commander_stage.set("closed")
-        else:
-            return  # already has 2 commanders
-
-        deck_data["commander"] = commander_cards
-        decks[deck] = deck_data
-        save_decks(user, decks)
-        card_update_counter.set(card_update_counter.get() + 1)
 
     @reactive.effect
     @reactive.event(input.commander_search_name)
     def commander_search():
         commander_search_name.set(input.commander_search_name())
+
+    @reactive.effect
+    @reactive.event(input.commander_choice)
+    def handle_commander_choice():
+        card_name = input.commander_choice()
+        username, deck = session_user.get(), active_deck.get()
+
+        if not username or not deck or not card_name:
+            return
+
+        decks = load_decks(username)
+        deck_data = decks.get(deck)
+        if not deck_data:
+            return
+
+        commander_data = deck_data.get("commander", [])
+        if isinstance(commander_data, str):
+            commander_data = [commander_data] if commander_data else []
+
+        cards_db = get_all_cards()
+        match = next((c for c in cards_db if c.get("name") == card_name), None)
+        if not match:
+            return
+
+        # Avoid duplicates
+        if any(c.get("name") == card_name for c in commander_data):
+            return
+
+        if len(commander_data) >= 2:
+            commander_error_val.set("⚠️ You can only have 2 commanders.")
+            return
+
+        commander_data.append(match)
+        deck_data["commander"] = commander_data
+        commander_error_val.set("")
+        update_decks_and_refresh(username, decks)
+
