@@ -1,8 +1,7 @@
 import os
 import psycopg2
-from typing import Optional
 from psycopg2.extras import RealDictCursor
-from mgtbase.card import Cards, Card
+from frontend.card import Cards, Card
 
 
 class DBManager:

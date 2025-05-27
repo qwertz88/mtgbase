@@ -42,6 +42,11 @@ def card_search_ui():
             inline=True
         ),
 
+        ui.input_slider(
+            "filter_mana_range", "Mana Value",
+            min=0, max=15, value=(0, 15)
+        ),
+
         ui.input_select(
             "filter_type",
             "Card Type",
@@ -98,16 +103,29 @@ def logged_in_ui(username):
 
 # --- Single deck view with card adding and back button ---
 def deck_view_ui(deck_name):
-    deck_data = load_decks(session_user.get()).get(deck_name, {})
-    card_count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
-
     return ui.div(
-        ui.h2(f"Deck: {deck_name} ({card_count}/100 cards)"),
+        # Title and deck card count
+        ui.div(
+            ui.h2(f"Deck: {deck_name}"),
+            ui.div(
+                ui.output_text("deck_card_counter"),
+                style="font-size: 1.1rem; font-weight: 500; color: #555;"
+            ),
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"
+        ),
 
+        # Choose Commander button
+        ui.input_action_button("choose_commander_btn", "Choose Commander", class_="btn-primary"),
+
+        # Commander picker (if open)
+        ui.output_ui("commander_search_view"),
+
+        # Deck cards
         ui.output_ui("deck_card_list"),
         ui.hr(),
 
-        ui.input_text("card_name", "Card Name"),
+        # Add cards to deck
+        ui.input_text("card_name", "Card name", value=search_name_value.get()),
 
         ui.div(
             ui.input_action_button("add_card_btn", "Search cards"),
@@ -118,39 +136,16 @@ def deck_view_ui(deck_name):
         ui.output_text("commander_error_msg"),
         ui.hr(),
 
+        # Card search list
         ui.output_ui("card_search_view")
     )
 
 
+
 # --- App root layout + JavaScript interactions ---
 app_ui = ui.page_fluid(
-    ui.tags.style("""
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            padding: 8px 10px;
-            border-bottom: 1px solid #ddd;
-            text-align: left;
-            vertical-align: middle;
-        }
-        tr:hover {
-            background-color: #f9f9f9;
-        }
-        a.toggle-fav {
-            text-decoration: none;
-            font-size: 16px;
-        }
-        a.open-deck {
-            font-weight: 500;
-            text-decoration: none;
-        }
-        a.delete-deck {
-            color: red;
-            text-decoration: none;
-            font-weight: bold;
-        }
+    ui.tags.style(""" 
+        /* your CSS here */
     """),
 
     ui.tags.script("""
@@ -190,13 +185,19 @@ app_ui = ui.page_fluid(
                 const cardName = e.target.dataset.card;
                 Shiny.setInputValue('add_selected_card', cardName, {priority: 'event'});
             }
+
+            // 👇 Commander card selector
+            if (e.target.classList.contains('add-commander-choice')) {
+                const cardName = e.target.dataset.card;
+                Shiny.setInputValue('commander_choice', cardName, {priority: 'event'});
+            }
         });
 
         Shiny.addCustomMessageHandler('clear_card_input', function(_) {
             const inputEl = document.querySelector('input[id$="card_name"]');
             if (inputEl) inputEl.value = "";
         });
-    """),
+    """),  # 👈 This comma is critical
 
-    ui.output_ui("main_ui")
+    ui.output_ui("main_ui")  # 👈 This must be inside the page_fluid
 )

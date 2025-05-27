@@ -6,9 +6,9 @@ from ui import login_ui, register_ui, logged_in_ui, deck_view_ui, card_search_ui
 from utils import (
     load_users, save_users,
     load_decks, save_decks,
-    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons
+    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons, render_card_list, find_card_by_name
 )
-from state import session_user, ui_mode, active_deck, card_update_counter
+from state import session_user, ui_mode, active_deck, card_update_counter, choose_commander_stage,commander_search_name
 
 # 🧠 Reactive values to show login/register feedback
 login_msg_val = reactive.Value("")
@@ -256,6 +256,7 @@ def server(input, output, session):
     @reactive.event(input.back_to_decks)
     def back_to_decks():
         active_deck.set(None)
+        show_card_search.set(False)  # 👈 Close card search view
 
     # Delete a deck from the user's list
     @reactive.effect
@@ -371,6 +372,12 @@ def server(input, output, session):
             mana_cost = card.get("manacost") or ""
             mana_cost_pips = {p.strip("{}") for p in mana_cost.split("}") if "{" in p}
 
+            # --- Manavalue ---
+            mana_range = input.filter_mana_range() if "filter_mana_range" in input else (0, 15)
+
+            mana_value = card.get("cmc") or card.get("manavalue") or 0
+            mana_ok = mana_range[0] <= mana_value <= mana_range[1]
+
             if mana_filter:
                 def is_colorless(pip):
                     return pip == "C" or pip.isdigit()
@@ -383,7 +390,7 @@ def server(input, output, session):
                 if color_filter and not any(pip in color_filter for pip in mana_cost_pips):
                     return False
 
-            return name_ok and type_ok and flavor_ok and subtype_ok
+            return name_ok and type_ok and flavor_ok and subtype_ok and mana_ok
 
         filtered = [card for card in cards if matches(card)]
 
@@ -391,6 +398,7 @@ def server(input, output, session):
             ui.tags.th("Add"),
             ui.tags.th("Name"),
             ui.tags.th("Mana Cost"),
+            ui.tags.th("Mana Value"),
             ui.tags.th("Type(s)"),
             ui.tags.th("Subtypes"),
             ui.tags.th("Power"),
@@ -406,8 +414,16 @@ def server(input, output, session):
                 ),
                 ui.tags.td(card.get("name") or ""),
                 ui.tags.td(render_mana_cost(card.get("manacost"))),
+                ui.tags.td(str(int(card.get("cmc") or card.get("manavalue") or 0))),
                 ui.tags.td(
-                    ", ".join(card.get("types")) if isinstance(card.get("types"), list) else card.get("types") or ""
+                    " ".join(
+                        filter(None, [
+                            " ".join(card.get("supertypes", [])) if isinstance(card.get("supertypes"),
+                                                                               list) else card.get("supertypes") or "",
+                            " ".join(card.get("types", [])) if isinstance(card.get("types"), list) else card.get(
+                                "types") or ""
+                        ])
+                    )
                 ),
                 ui.tags.td(card.get("subtypes") or ""),
                 ui.tags.td(card.get("power") or ""),
@@ -465,13 +481,10 @@ def server(input, output, session):
     @output
     @render.ui
     def deck_card_list():
-        _ = card_update_counter.get()
-        username, deck = session_user.get(), active_deck.get()
-        if not username or not deck:
+        deck_data = current_deck_data()  # 👈 Reactively tracks deck + card changes
+        if not deck_data:
             return ui.div()
 
-        decks = load_decks(username)
-        deck_data = decks.get(deck, {})
         all_cards = deck_data.get("cards", [])
         commander_cards = deck_data.get("commander", [])
 
@@ -485,6 +498,10 @@ def server(input, output, session):
             card_type = get_card_type(card, [c["name"] for c in commander_cards])
             grouped[card_type].append(card)
 
+        # Sort each group by mana value (cmc)
+        for tag in grouped:
+            grouped[tag] = sorted(grouped[tag], key=lambda c: c.get("cmc") or c.get("manavalue") or 0)
+
         sections = []
         for tag in TAG_ORDER:
             cards = grouped.get(tag)
@@ -496,13 +513,31 @@ def server(input, output, session):
                 ui.tags.ul(*[
                     ui.tags.li(
                         ui.span(card["name"] + " "),
+                        ui.HTML(render_mana_cost(card.get("manacost"))),
                         ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
                     )
-                    for card in sorted(cards, key=lambda c: c["name"])
+                    for card in cards
                 ])
             )
 
-        return ui.div(*sections)
+        return ui.div(
+            *[
+                ui.div(  # Each section is a grid item
+                    ui.h4(f"{tag.capitalize()} ({len(cards)})"),
+                    ui.tags.ul(*[
+                        ui.tags.li(
+                            ui.span(card["name"] + " "),
+                            ui.HTML(render_mana_cost(card.get("manacost"))),
+                            ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
+                        )
+                        for card in cards
+                    ])
+                )
+                for tag in TAG_ORDER
+                if (cards := grouped.get(tag))
+            ],
+            style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; align-items: start;"
+        )
 
     @reactive.effect
     @reactive.event(input.add_commander_btn)
@@ -543,11 +578,13 @@ def server(input, output, session):
     @output
     @render.text
     def deck_title():
-        username, deck = session_user.get(), active_deck.get()
-        if not username or not deck:
+        # 👇 Explicitly make this reactive
+        _ = card_update_counter.get()
+        deck = active_deck.get()
+        if not deck:
             return ""
 
-        decks = load_decks(username)
+        decks = load_decks(session_user.get())
         deck_data = decks.get(deck, {})
         count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
         return f"Deck: {deck} ({count}/100 cards)"
@@ -556,3 +593,129 @@ def server(input, output, session):
     @render.text
     def card_error_msg():
         return card_error_val.get()
+
+    @reactive.effect
+    @reactive.event(input.card_name)
+    def sync_card_name_to_search():
+        if show_card_search.get():
+            search_name_value.set(input.card_name())
+
+    @reactive.calc
+    def current_deck_data():
+        _ = card_update_counter.get()
+        username = session_user.get()
+        deck = active_deck.get()
+
+        if not username or not deck:
+            return {}
+
+        decks = load_decks(username)
+        return decks.get(deck, {})
+
+    @output
+    @render.text
+    def deck_card_counter():
+        _ = card_update_counter.get()
+        deck = active_deck.get()
+        if not deck:
+            return ""
+
+        decks = load_decks(session_user.get())
+        deck_data = decks.get(deck, {})
+        count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
+        return f"{count}/100 cards"
+
+    @reactive.effect
+    @reactive.event(input.choose_commander_btn)
+    def show_commander_picker():
+        choose_commander_stage.set("first")
+        show_card_search.set(False)  # hide regular search
+
+    @output
+    @render.ui
+    def commander_search_view():
+        stage = choose_commander_stage.get()
+        if stage == "closed":
+            return ui.div()
+
+        name_filter = commander_search_name.get().lower().strip()
+        cards = get_all_cards()
+
+        if stage == "first":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and (
+                        "Creature" in (card.get("types") or []) or
+                        ("Planeswalker" in (card.get("types") or []) and "can be your commander" in (
+                                    card.get("text") or "").lower())
+                )
+            ]
+        elif stage == "partner":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and
+                   "Creature" in (card.get("types") or []) and
+                   "partner" in (card.get("text") or "").lower()
+            ]
+        elif stage == "background":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and
+                   "Enchantment" in (card.get("types") or [])
+            ]
+        else:
+            filtered = []
+
+        if name_filter:
+            filtered = [card for card in filtered if name_filter in card["name"].lower()]
+
+        return ui.div(
+            ui.input_text("commander_search_name", "Filter by name", value=commander_search_name.get()),
+            render_card_list(filtered, add_button_class="add-commander-choice")
+        )
+
+    @reactive.effect
+    @reactive.event(input.commander_choice)
+    def handle_commander_selection():
+        card_name = input.commander_choice()
+        user = session_user.get()
+        deck = active_deck.get()
+        if not (user and deck and card_name):
+            return
+
+        decks = load_decks(user)
+        deck_data = decks.get(deck, {})
+        commander_cards = deck_data.get("commander", [])
+        card = find_card_by_name(card_name)
+
+        if not card:
+            return
+
+        if not commander_cards:
+            commander_cards.append(card)
+            if "background" in (card.get("text") or "").lower():
+                choose_commander_stage.set("background")
+            elif "partner" in (card.get("text") or "").lower():
+                choose_commander_stage.set("partner")
+            else:
+                choose_commander_stage.set("closed")
+        elif len(commander_cards) == 1:
+            first = commander_cards[0]
+            if "background" in (first.get("text") or "").lower() and "Enchantment" in (card.get("types") or []):
+                commander_cards.append(card)
+                choose_commander_stage.set("closed")
+            elif "partner" in (first.get("text") or "").lower() and "partner" in (card.get("text") or "").lower():
+                commander_cards.append(card)
+                choose_commander_stage.set("closed")
+        else:
+            return  # already has 2 commanders
+
+        deck_data["commander"] = commander_cards
+        decks[deck] = deck_data
+        save_decks(user, decks)
+        card_update_counter.set(card_update_counter.get() + 1)
+
+    @reactive.effect
+    @reactive.event(input.commander_search_name)
+    def commander_search():
+        commander_search_name.set(input.commander_search_name())
