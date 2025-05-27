@@ -11,7 +11,6 @@ login_ui = ui.div(
     ui.input_action_button("login_btn", "Login"),
     ui.p(ui.a("No account? Register here", href="#", id="go_register")),
     ui.output_text("login_msg"),
-    ui.output_text("card_error_msg"),
 )
 
 # --- Registration page layout ---
@@ -71,12 +70,7 @@ def card_search_ui():
         ),
 
         ui.input_text("filter_subtype", "Subtype contains"),
-        ui.input_text("filter_flavor", "Flavor text contains"),
-
-        ui.tags.p(
-            {"style": "color: red; font-weight: bold; margin-top: 0.5em;"},
-            ui.output_text("card_error_msg")
-        ),
+        ui.input_text("filter_flavor", "Text contains"),
 
         ui.hr(),
         ui.output_ui("filtered_card_list")
@@ -104,42 +98,64 @@ def logged_in_ui(username):
 # --- Single deck view with card adding and back button ---
 def deck_view_ui(deck_name):
     return ui.div(
-        # Title and deck card count
         ui.div(
-            ui.h2(f"Deck: {deck_name}"),
-            ui.div(
-                ui.output_text("deck_card_counter"),
-                style="font-size: 1.1rem; font-weight: 500; color: #555;"
-            ),
+            [
+                ui.h2(ui.output_text("deck_title")),
+                ui.div(
+                    [
+                        ui.span(
+                            ui.output_text("deck_card_counter"),
+                            style="font-size: 1.2rem; font-weight: bold;"
+                        ),
+                        ui.input_action_button("back_to_decks", "← Back to Deck List"),
+                    ],
+                    style="display: flex; gap: 1rem; align-items: center;"
+                )
+            ],
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"
         ),
 
-        ui.input_text("commander_search_name", "Commander Name (optional before opening)", value=""),
-        ui.input_action_button("choose_commander_btn", "Choose Commander", class_="btn-primary"),
-
-
-        # Commander picker (if open)
-        ui.output_ui("commander_search_view"),
-
-        # Deck cards
-        ui.output_ui("deck_card_list"),
-        ui.hr(),
-
-        # Add cards to deck
-        ui.input_text("card_name", "Card name", value=search_name_value.get()),
-
+        # 🎛️ Add Commander and Add Card section side by side
         ui.div(
-            ui.input_action_button("add_card_btn", "Search cards"),
-            ui.input_action_button("back_to_decks", "← Back to Deck List"),
-            style="margin-top: 8px; display: flex; gap: 8px;"
+            {
+                "style": "display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; margin-bottom: 1rem;"
+            },
+
+            # 🎯 Left column: Commander input
+            ui.div(
+                ui.input_text("commander_search_name", ui.tags.strong("Commander Name"), value=""),
+                ui.input_action_button("choose_commander_btn", "Choose Commander"),
+                ui.tags.p(
+                    ui.output_text("commander_error_msg"),
+                    style="color: red; font-weight: 500; margin-top: 0.3rem;"
+                ),
+                style="flex: 1;"
+            ),
+
+            # 🧩 Right column: Card input + back button
+            ui.div(
+                ui.input_text("card_name", ui.tags.strong("Card name"), value=search_name_value.get()),
+
+                ui.div(
+                    ui.input_action_button("add_card_btn", "Search cards"),
+                    style="margin-top: 8px; display: flex; gap: 8px;"
+                ),
+                ui.tags.p(
+                    ui.output_text("card_error_msg"),
+                    style="color: red; font-weight: 500; margin-top: 0.3rem;"
+                ),
+                style="flex: 1;"
+            ),
         ),
 
-        ui.output_text("commander_error_msg"),
-        ui.hr(),
+        # 📦 Current deck card list
+        ui.output_ui("deck_card_list"),
 
-        # Card search list
+        # 🔍 Commander and card search results (only one shown at a time)
+        ui.output_ui("commander_search_view"),
         ui.output_ui("card_search_view")
     )
+
 
 # --- App root layout + JavaScript interactions ---
 app_ui = ui.page_fluid(
