@@ -11,7 +11,6 @@ login_ui = ui.div(
     ui.input_action_button("login_btn", "Login"),
     ui.p(ui.a("No account? Register here", href="#", id="go_register")),
     ui.output_text("login_msg"),
-    ui.output_text("card_error_msg"),
 )
 
 # --- Registration page layout ---
@@ -42,6 +41,11 @@ def card_search_ui():
             inline=True
         ),
 
+        ui.input_slider(
+            "filter_mana_range", "Mana Value",
+            min=0, max=15, value=(0, 15)
+        ),
+
         ui.input_select(
             "filter_type",
             "Card Type",
@@ -66,12 +70,7 @@ def card_search_ui():
         ),
 
         ui.input_text("filter_subtype", "Subtype contains"),
-        ui.input_text("filter_flavor", "Flavor text contains"),
-
-        ui.tags.p(
-            {"style": "color: red; font-weight: bold; margin-top: 0.5em;"},
-            ui.output_text("card_error_msg")
-        ),
+        ui.input_text("filter_flavor", "Text contains"),
 
         ui.hr(),
         ui.output_ui("filtered_card_list")
@@ -98,59 +97,70 @@ def logged_in_ui(username):
 
 # --- Single deck view with card adding and back button ---
 def deck_view_ui(deck_name):
-    deck_data = load_decks(session_user.get()).get(deck_name, {})
-    card_count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
-
     return ui.div(
-        ui.h2(f"Deck: {deck_name} ({card_count}/100 cards)"),
-
-        ui.output_ui("deck_card_list"),
-        ui.hr(),
-
-        ui.input_text("card_name", "Card Name"),
-
         ui.div(
-            ui.input_action_button("add_card_btn", "Search cards"),
-            ui.input_action_button("back_to_decks", "← Back to Deck List"),
-            style="margin-top: 8px; display: flex; gap: 8px;"
+            [
+                ui.h2(ui.output_text("deck_title")),
+                ui.div(
+                    [
+                        ui.span(
+                            ui.output_text("deck_card_counter"),
+                            style="font-size: 1.2rem; font-weight: bold;"
+                        ),
+                        ui.input_action_button("back_to_decks", "← Back to Deck List"),
+                    ],
+                    style="display: flex; gap: 1rem; align-items: center;"
+                )
+            ],
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"
         ),
 
-        ui.output_text("commander_error_msg"),
-        ui.hr(),
+        # 🎛️ Add Commander and Add Card section side by side
+        ui.div(
+            {
+                "style": "display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; margin-bottom: 1rem;"
+            },
 
+            # 🎯 Left column: Commander input
+            ui.div(
+                ui.input_text("commander_search_name", ui.tags.strong("Commander Name"), value=""),
+                ui.input_action_button("choose_commander_btn", "Choose Commander"),
+                ui.tags.p(
+                    ui.output_text("commander_error_msg"),
+                    style="color: red; font-weight: 500; margin-top: 0.3rem;"
+                ),
+                style="flex: 1;"
+            ),
+
+            # 🧩 Right column: Card input + back button
+            ui.div(
+                ui.input_text("card_name", ui.tags.strong("Card name"), value=search_name_value.get()),
+
+                ui.div(
+                    ui.input_action_button("add_card_btn", "Search cards"),
+                    style="margin-top: 8px; display: flex; gap: 8px;"
+                ),
+                ui.tags.p(
+                    ui.output_text("card_error_msg"),
+                    style="color: red; font-weight: 500; margin-top: 0.3rem;"
+                ),
+                style="flex: 1;"
+            ),
+        ),
+
+        # 📦 Current deck card list
+        ui.output_ui("deck_card_list"),
+
+        # 🔍 Commander and card search results (only one shown at a time)
+        ui.output_ui("commander_search_view"),
         ui.output_ui("card_search_view")
     )
 
 
 # --- App root layout + JavaScript interactions ---
 app_ui = ui.page_fluid(
-    ui.tags.style("""
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            padding: 8px 10px;
-            border-bottom: 1px solid #ddd;
-            text-align: left;
-            vertical-align: middle;
-        }
-        tr:hover {
-            background-color: #f9f9f9;
-        }
-        a.toggle-fav {
-            text-decoration: none;
-            font-size: 16px;
-        }
-        a.open-deck {
-            font-weight: 500;
-            text-decoration: none;
-        }
-        a.delete-deck {
-            color: red;
-            text-decoration: none;
-            font-weight: bold;
-        }
+    ui.tags.style(""" 
+        /* your CSS here */
     """),
 
     ui.tags.script("""
@@ -190,13 +200,19 @@ app_ui = ui.page_fluid(
                 const cardName = e.target.dataset.card;
                 Shiny.setInputValue('add_selected_card', cardName, {priority: 'event'});
             }
+
+            // 👇 Commander card selector
+            if (e.target.classList.contains('add-commander-choice')) {
+                const cardName = e.target.dataset.card;
+                Shiny.setInputValue('commander_choice', cardName, {priority: 'event'});
+            }
         });
 
         Shiny.addCustomMessageHandler('clear_card_input', function(_) {
             const inputEl = document.querySelector('input[id$="card_name"]');
             if (inputEl) inputEl.value = "";
         });
-    """),
+    """),  # 👈 This comma is critical
 
-    ui.output_ui("main_ui")
+    ui.output_ui("main_ui")  # 👈 This must be inside the page_fluid
 )

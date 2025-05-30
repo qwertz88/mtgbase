@@ -6,15 +6,17 @@ from ui import login_ui, register_ui, logged_in_ui, deck_view_ui, card_search_ui
 from utils import (
     load_users, save_users,
     load_decks, save_decks,
-    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons
+    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons, render_card_list, find_card_by_name
 )
-from state import session_user, ui_mode, active_deck, card_update_counter
+from state import session_user, ui_mode, active_deck, card_update_counter, choose_commander_stage,commander_search_name
 
 # 🧠 Reactive values to show login/register feedback
 login_msg_val = reactive.Value("")
 register_msg_val = reactive.Value("")
 card_error_val = reactive.Value("")
 commander_error_val = reactive.Value("")
+commander_color_identity = reactive.Value(set())
+
 
 # 🔄 Load user data once on startup
 USERS = load_users()
@@ -131,6 +133,16 @@ def server(input, output, session):
         for deck in sorted(filtered, key=lambda d: (not filtered[d].get("favorite", False), d.lower())):
             deck_data = filtered[deck]
 
+            # Extract colors from commanders' mana costs
+            commander_colors = set()
+            for commander in deck_data.get("commander", []):
+                mana = commander.get("manacost") or ""
+                for pip in mana.split("}"):
+                    if "{" in pip:
+                        symbol = pip.strip("{}").upper()
+                        if symbol in {"W", "U", "B", "R", "G"}:
+                            commander_colors.add(symbol)
+
             rows.append(ui.tags.tr(
                 ui.tags.td(
                     ui.a("⭐" if deck_data.get("favorite") else "☆",
@@ -149,9 +161,10 @@ def server(input, output, session):
                            height="16px",
                            style="vertical-align: middle; margin-right: 2px;",
                            title=color)
-                    for color in deck_data.get("colors", [])
+                    for color in sorted(commander_colors)
                 ]),
-                ui.tags.td(" | ".join(deck_data.get("commander", [])) if deck_data.get("commander") else "—"),
+                ui.tags.td(" | ".join([c.get("name", "?") for c in deck_data.get("commander", [])])
+                           if deck_data.get("commander") else "—"),
                 ui.tags.td(format_updated(deck_data.get("updated_at"))),
                 ui.tags.td(
                     ui.a("❌", href="#", class_="delete-deck",
@@ -256,6 +269,8 @@ def server(input, output, session):
     @reactive.event(input.back_to_decks)
     def back_to_decks():
         active_deck.set(None)
+        show_card_search.set(False)
+        choose_commander_stage.set("closed")  # 👈 close commander search
 
     # Delete a deck from the user's list
     @reactive.effect
@@ -280,13 +295,20 @@ def server(input, output, session):
         username, deck = session_user.get(), active_deck.get()
         card = get_clean_input(input, "card_name")
 
+        choose_commander_stage.set("closed")  # 👈 Close commander list first
         search_name_value.set(card)
         show_card_search.set(True)
 
         if username and deck and card:
             add_card_to_deck(username, deck, card)
+
+            # Update updated_at manually
+            decks = load_decks(username)
+            if deck in decks:
+                decks[deck]["updated_at"] = datetime.utcnow().isoformat()
+                save_decks(username, decks)
+
             trigger_update()
-            await session.send_custom_message("clear_card_input", {})
 
     # Toggle favorite on decks
     @reactive.effect
@@ -329,8 +351,8 @@ def server(input, output, session):
                     changed |= len(deck_data["commander"]) < before
 
                 if changed:
-                    save_decks(username, decks)
-                    trigger_update()
+                    deck_data["updated_at"] = datetime.utcnow().isoformat()
+                    update_decks_and_refresh(username, decks)
 
     @output
     @render.text
@@ -346,7 +368,7 @@ def server(input, output, session):
     def filtered_card_list():
         name_filter = search_name_value.get() or ""
         type_filter = input.filter_type() or ""
-        flavor_filter = input.filter_flavor() or ""
+        text_filter = input.filter_flavor() or ""
         subtype_filter = input.filter_subtype() or ""
         mana_filter = input.filter_mana_colors() or []
 
@@ -355,35 +377,37 @@ def server(input, output, session):
         def matches(card):
             name_ok = name_filter.lower() in (card.get("name") or "").lower()
 
-            # --- Type ---
             card_types = card.get("types", [])
             if isinstance(card_types, str):
                 card_types = [t.strip() for t in card_types.split(",")]
             type_ok = not type_filter or type_filter.lower() in [t.lower() for t in card_types]
 
-            # --- Subtype ---
             subtype_ok = subtype_filter.lower() in (card.get("subtypes") or "").lower()
+            text_ok = text_filter.lower() in (card.get("text") or "").lower()
 
-            # --- Flavor text ---
-            flavor_ok = flavor_filter.lower() in (card.get("text") or "").lower()
-
-            # --- Mana color check ---
             mana_cost = card.get("manacost") or ""
             mana_cost_pips = {p.strip("{}") for p in mana_cost.split("}") if "{" in p}
 
-            if mana_filter:
-                def is_colorless(pip):
-                    return pip == "C" or pip.isdigit()
+            mana_range = input.filter_mana_range() if "filter_mana_range" in input else (0, 15)
+            mana_value = card.get("cmc") or card.get("manavalue") or 0
+            mana_ok = mana_range[0] <= mana_value <= mana_range[1]
 
-                if "C" in mana_filter:
-                    if not any(is_colorless(p) for p in mana_cost_pips):
+            commander_colors = commander_color_identity()
+
+            # Only enforce color identity if no mana color filter is applied
+            if mana_filter:
+                allowed = set(mana_filter)
+                all_pips = {pip for pip in mana_cost_pips if pip in {"W", "U", "B", "R", "G"}}
+                extras = all_pips - allowed
+                if extras:
+                    return False
+            else:
+                for pip in mana_cost_pips:
+                    if pip in {"W", "U", "B", "R", "G"} and pip not in commander_colors:
                         return False
 
-                color_filter = set(mana_filter) - {"C"}
-                if color_filter and not any(pip in color_filter for pip in mana_cost_pips):
-                    return False
 
-            return name_ok and type_ok and flavor_ok and subtype_ok
+            return name_ok and type_ok and text_ok and subtype_ok and mana_ok
 
         filtered = [card for card in cards if matches(card)]
 
@@ -391,35 +415,46 @@ def server(input, output, session):
             ui.tags.th("Add"),
             ui.tags.th("Name"),
             ui.tags.th("Mana Cost"),
+            ui.tags.th("Mana Value"),
             ui.tags.th("Type(s)"),
             ui.tags.th("Subtypes"),
-            ui.tags.th("Power"),
-            ui.tags.th("Toughness"),
+            ui.tags.th("Stats"),
             ui.tags.th("Text"),
-            ui.tags.th("Rarity"),
         )
 
-        rows = [
-            ui.tags.tr(
+        rows = []
+        for card in filtered:
+            types = " ".join([
+                *(card.get("supertypes") if isinstance(card.get("supertypes"), list) else [
+                    card.get("supertypes")] if card.get("supertypes") else []),
+                *(card.get("types") if isinstance(card.get("types"), list) else [card.get("types")] if card.get(
+                    "types") else [])
+            ])
+
+            subtypes = ", ".join(card.get("subtypes", [])) if isinstance(card.get("subtypes"), list) else (
+                        card.get("subtypes") or "")
+            stats = ""
+            if card.get("power") and card.get("toughness"):
+                stats = f"{card['power']}/{card['toughness']}"
+
+            rows.append(ui.tags.tr(
                 ui.tags.td(
-                    ui.tags.button("Add", class_="add-card-btn", **{"data-card": card["name"]})
+                    ui.tags.button("Add", class_="add-card-btn", **{"data-card": card["name"]}),
+                    style="border: 1px solid #ccc; padding: 6px;"
                 ),
-                ui.tags.td(card.get("name") or ""),
-                ui.tags.td(render_mana_cost(card.get("manacost"))),
-                ui.tags.td(
-                    ", ".join(card.get("types")) if isinstance(card.get("types"), list) else card.get("types") or ""
-                ),
-                ui.tags.td(card.get("subtypes") or ""),
-                ui.tags.td(card.get("power") or ""),
-                ui.tags.td(card.get("toughness") or ""),
-                ui.tags.td(render_text_with_icons(card.get("text"))),
-                ui.tags.td(card.get("rarity") or "")
-            )
-            for card in filtered
-        ]
+                ui.tags.td(card.get("name", ""), style="border: 1px solid #ccc; padding: 6px; font-weight: bold;"),
+                ui.tags.td(render_mana_cost(card.get("manacost")), style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(str(int(card.get("cmc") or card.get("manavalue") or 0)),
+                           style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(types, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(subtypes, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(stats, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(ui.HTML(render_text_with_icons(card.get("text", ""))),
+                           style="border: 1px solid #ccc; padding: 6px; white-space: pre-wrap;")
+            ))
 
         return ui.tags.table(
-            {"style": "width: 100%; border-collapse: collapse; margin-top: 1em;"},
+            {"style": "width: 100%; border-collapse: collapse; border: 1px solid #ccc;"},
             headers,
             *rows
         )
@@ -459,19 +494,17 @@ def server(input, output, session):
 
             commander_data.append(match)
             deck_data["commander"] = commander_data
+            deck_data["updated_at"] = datetime.utcnow().isoformat()
             commander_error_val.set("")  # ✅ Clear error
             update_decks_and_refresh(username, decks)
 
     @output
     @render.ui
     def deck_card_list():
-        _ = card_update_counter.get()
-        username, deck = session_user.get(), active_deck.get()
-        if not username or not deck:
+        deck_data = current_deck_data()  # 👈 Reactively tracks deck + card changes
+        if not deck_data:
             return ui.div()
 
-        decks = load_decks(username)
-        deck_data = decks.get(deck, {})
         all_cards = deck_data.get("cards", [])
         commander_cards = deck_data.get("commander", [])
 
@@ -485,6 +518,10 @@ def server(input, output, session):
             card_type = get_card_type(card, [c["name"] for c in commander_cards])
             grouped[card_type].append(card)
 
+        # Sort each group by mana value (cmc)
+        for tag in grouped:
+            grouped[tag] = sorted(grouped[tag], key=lambda c: c.get("cmc") or c.get("manavalue") or 0)
+
         sections = []
         for tag in TAG_ORDER:
             cards = grouped.get(tag)
@@ -496,19 +533,31 @@ def server(input, output, session):
                 ui.tags.ul(*[
                     ui.tags.li(
                         ui.span(card["name"] + " "),
+                        ui.HTML(render_mana_cost(card.get("manacost"))),
                         ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
                     )
-                    for card in sorted(cards, key=lambda c: c["name"])
+                    for card in cards
                 ])
             )
 
-        return ui.div(*sections)
-
-    @reactive.effect
-    @reactive.event(input.add_commander_btn)
-    def _():
-        search_name_value.set(input.card_name())
-        show_card_search.set(True)
+        return ui.div(
+            *[
+                ui.div(  # Each section is a grid item
+                    ui.h4(f"{tag.capitalize()} ({len(cards)})"),
+                    ui.tags.ul(*[
+                        ui.tags.li(
+                            ui.span(card["name"] + " "),
+                            ui.HTML(render_mana_cost(card.get("manacost"))),
+                            ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
+                        )
+                        for card in cards
+                    ])
+                )
+                for tag in TAG_ORDER
+                if (cards := grouped.get(tag))
+            ],
+            style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; align-items: start;"
+        )
 
     @output
     @render.ui
@@ -517,7 +566,7 @@ def server(input, output, session):
 
     @reactive.effect
     @reactive.event(input.add_selected_card)
-    def _():
+    def add_card_from_list():
         deck = active_deck.get()
         card_name = input.add_selected_card()
         if deck and card_name:
@@ -543,11 +592,10 @@ def server(input, output, session):
     @output
     @render.text
     def deck_title():
-        username, deck = session_user.get(), active_deck.get()
-        if not username or not deck:
-            return ""
+        deck = active_deck.get()
+        return f"Deck: {deck}" if deck else ""
 
-        decks = load_decks(username)
+        decks = load_decks(session_user.get())
         deck_data = decks.get(deck, {})
         count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
         return f"Deck: {deck} ({count}/100 cards)"
@@ -556,3 +604,220 @@ def server(input, output, session):
     @render.text
     def card_error_msg():
         return card_error_val.get()
+
+    @reactive.effect
+    @reactive.event(input.card_name)
+    def sync_card_name_to_search():
+        if show_card_search.get():
+            search_name_value.set(input.card_name())
+
+    @reactive.calc
+    def current_deck_data():
+        _ = card_update_counter.get()
+        username = session_user.get()
+        deck = active_deck.get()
+
+        if not username or not deck:
+            return {}
+
+        decks = load_decks(username)
+        return decks.get(deck, {})
+
+    @output
+    @render.text
+    def deck_card_counter():
+        _ = card_update_counter.get()
+        deck = active_deck.get()
+        if not deck:
+            return ""
+
+        decks = load_decks(session_user.get())
+        deck_data = decks.get(deck, {})
+        count = len(deck_data.get("cards", [])) + len(deck_data.get("commander", []))
+        return f"{count}/100 cards"
+
+    @reactive.effect
+    @reactive.event(input.choose_commander_btn)
+    def show_commander_picker():
+        username, deck = session_user.get(), active_deck.get()
+        if not username or not deck:
+            return
+
+        decks = load_decks(username)
+        deck_data = decks.get(deck, {})
+        commanders = deck_data.get("commander", [])
+
+        if isinstance(commanders, dict):
+            commanders = [commanders]
+        elif isinstance(commanders, str):
+            commanders = [commanders] if commanders else []
+
+        show_card_search.set(False)  # 👈 Close card search first
+
+        if len(commanders) >= 2:
+            commander_error_val.set("⚠️ Your command zone is full.")
+            return
+        # ...rest of logic
+
+        if len(commanders) == 1:
+            text = (commanders[0].get("text") or "").lower()
+
+            if "partner" in text:
+                choose_commander_stage.set("partner")  # ✅ only show partner options
+            elif "background" in text:
+                choose_commander_stage.set("background")  # ✅ only show backgrounds
+            else:
+                commander_error_val.set("⚠️ Your command zone is full.")
+                return
+        else:
+            choose_commander_stage.set("first")  # ✅ no commander yet
+
+        commander_error_val.set("")  # Clear any previous error
+
+    @output
+    @render.ui
+    def commander_search_view():
+        stage = choose_commander_stage.get()
+        if stage == "closed":
+            return ui.div()
+
+        name_filter = commander_search_name.get().lower().strip()
+        cards = get_all_cards()
+
+        if stage == "first":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and (
+                        "Creature" in (card.get("types") or []) or
+                        ("Planeswalker" in (card.get("types") or []) and "can be your commander" in (
+                                    card.get("text") or "").lower())
+                )
+            ]
+        elif stage == "partner":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and
+                   "Creature" in (card.get("types") or []) and
+                   "partner" in (card.get("text") or "").lower()
+            ]
+        elif stage == "background":
+            filtered = [
+                card for card in cards
+                if "Legendary" in (card.get("supertypes") or []) and
+                   "Enchantment" in (card.get("types") or []) and
+                   "Background" in (card.get("subtypes") or [])
+            ]
+        else:
+            filtered = []
+
+        if name_filter:
+            filtered = [card for card in filtered if name_filter in card["name"].lower()]
+
+        headers = ui.tags.tr(
+            ui.tags.th("Add"),
+            ui.tags.th("Name"),
+            ui.tags.th("Mana Cost"),
+            ui.tags.th("Mana Value"),
+            ui.tags.th("Type(s)"),
+            ui.tags.th("Subtypes"),
+            ui.tags.th("Stats"),
+            ui.tags.th("Text"),
+        )
+
+        rows = []
+        for card in filtered:
+            types = " ".join(
+                filter(None, [
+                    ", ".join(card.get("supertypes")) if isinstance(card.get("supertypes"), list) else card.get(
+                        "supertypes") or "",
+                    ", ".join(card.get("types")) if isinstance(card.get("types"), list) else card.get("types") or ""
+                ])
+            )
+            subtypes = ", ".join(card.get("subtypes", [])) if isinstance(card.get("subtypes"), list) else (
+                        card.get("subtypes") or "")
+            stats = ""
+            if card.get("power") and card.get("toughness"):
+                stats = f"{card['power']}/{card['toughness']}"
+
+            rows.append(ui.tags.tr(
+                ui.tags.td(
+                    ui.tags.button("Add", class_="add-commander-choice", **{"data-card": card["name"]}),
+                    style="border: 1px solid #ccc; padding: 6px;"
+                ),
+                ui.tags.td(card.get("name", ""), style="border: 1px solid #ccc; padding: 6px; font-weight: bold;"),
+                ui.tags.td(render_mana_cost(card.get("manacost")), style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(str(int(card.get("cmc") or card.get("manavalue") or 0)),
+                           style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(types, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(subtypes, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(stats, style="border: 1px solid #ccc; padding: 6px;"),
+                ui.tags.td(ui.HTML(render_text_with_icons(card.get("text", ""))),
+                           style="border: 1px solid #ccc; padding: 6px; white-space: pre-wrap;")
+            ))
+
+        return ui.div(
+            ui.tags.table(
+                {"style": "width: 100%; border-collapse: collapse; border: 1px solid #ccc;"},
+                headers,
+                *rows
+            )
+        )
+
+    @reactive.effect
+    @reactive.event(input.commander_search_name)
+    def commander_search():
+        commander_search_name.set(input.commander_search_name())
+
+    @reactive.effect
+    @reactive.event(input.commander_choice)
+    def handle_commander_choice():
+        card_name = input.commander_choice()
+        username, deck = session_user.get(), active_deck.get()
+
+        if not username or not deck or not card_name:
+            return
+
+        decks = load_decks(username)
+        deck_data = decks.get(deck)
+        if not deck_data:
+            return
+
+        commander_data = deck_data.get("commander", [])
+        if isinstance(commander_data, str):
+            commander_data = [commander_data] if commander_data else []
+
+        cards_db = get_all_cards()
+        match = next((c for c in cards_db if c.get("name") == card_name), None)
+        if not match:
+            return
+
+        # Avoid duplicates
+        if any(c.get("name") == card_name for c in commander_data):
+            return
+
+        if len(commander_data) >= 2:
+            commander_error_val.set("⚠️ You can only have 2 commanders.")
+            return
+
+        commander_data.append(match)
+        deck_data["commander"] = commander_data
+        deck_data["updated_at"] = datetime.utcnow().isoformat()
+        commander_error_val.set("")
+        update_decks_and_refresh(username, decks)
+
+        choose_commander_stage.set("closed")
+
+    @reactive.calc
+    def commander_color_identity():
+        deck_data = current_deck_data()
+        commanders = deck_data.get("commander", [])
+        identity = set()
+
+        for cmd in commanders:
+            mana = cmd.get("manacost", "")
+            for pip in mana.split("}"):
+                if "{" in pip:
+                    symbol = pip.strip("{}").upper()
+                    if symbol in {"W", "U", "B", "R", "G"}:
+                        identity.add(symbol)
+        return identity

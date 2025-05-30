@@ -3,7 +3,7 @@ import json
 import pathlib
 import re
 from datetime import datetime
-from dbmanager2 import DBManager2
+from dbmanager import DBManager
 from shiny import ui
 
 # 💬 File and folder paths
@@ -89,10 +89,9 @@ def add_card_to_deck(username, deck_name, card_name):
         decks[deck_name]["updated_at"] = datetime.utcnow().isoformat()
         save_decks(username, decks)
 
-
 # utils.py
 _password = os.environ.get("DB_PASSWORD")
-_db = DBManager2(dbname="mtgbase", user="postgres", password=_password)
+_db = DBManager(dbname="mtgbase", user="postgres", password=_password)
 
 def get_all_cards() -> list[dict]:
     # Get only selected card info for the UI
@@ -148,7 +147,9 @@ def render_text_with_icons(text):
         text.replace("â€”", "—")  # em dash
             .replace("â€™", "’")  # apostrophe
             .replace("\\n", "\n")  # literal "\n" to newline
-            .replace("\n", "<br>")  # actual linebreaks to HTML
+            .replace("\n", "<br>")
+            .replace("â€¢", "*")# actual linebreaks to HTML
+            .replace("âˆ’", "-")
     )
 
     def replace_symbol(match):
@@ -167,4 +168,37 @@ def render_text_with_icons(text):
     html = re.sub(r"\{([^}]+)\}", replace_symbol, text)
     return ui.HTML(html)
 
+def render_card_list(cards, add_button_class="add-card-btn"):
+    headers = ui.tags.tr(
+        ui.tags.th("Add"),
+        ui.tags.th("Name"),
+        ui.tags.th("Mana Cost"),
+        ui.tags.th("Type(s)"),
+        ui.tags.th("Text"),
+    )
 
+    rows = [
+        ui.tags.tr(
+            ui.tags.td(
+                ui.tags.button("Add", class_=add_button_class, **{"data-card": card["name"]})
+            ),
+            ui.tags.td(card.get("name") or ""),
+            ui.tags.td(str(int(card.get("manavalue"))) if card.get("manavalue") is not None else ""),
+            ui.tags.td(" ".join((card.get("supertypes") or []) + (card.get("types") or []))),
+            ui.tags.td(render_text_with_icons(card.get("text"))),
+        )
+        for card in cards
+    ]
+
+    return ui.tags.table(
+        {"style": "width: 100%; border-collapse: collapse; margin-top: 1em;"},
+        headers,
+        *rows
+    )
+
+def find_card_by_name(name):
+    cards = get_all_cards()
+    for card in cards:
+        if card["name"].lower() == name.lower():
+            return card
+    return None
