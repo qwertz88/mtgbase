@@ -6,127 +6,124 @@ from datetime import datetime
 from dbmanager import DBManager
 from shiny import ui
 
-# 💬 File and folder paths
-# BASE_DIR points to the folder containing this file
+# === Path Configuration ===
+
+# Define base project directory
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 
-# DATA_DIR will hold all application data (users + decks)
+# Directory for application data
 DATA_DIR = BASE_DIR / "data"
 
-# USERS_FILE stores all login credentials as JSON: {username: password}
+# JSON file for user credentials
 USERS_FILE = DATA_DIR / "users.json"
 
-# DECKS_DIR contains one .json file per user with their deck data
+# Directory containing decks per user
 DECKS_DIR = DATA_DIR / "decks"
 
-# Create the decks folder if it doesn't exist
+# Ensure data directories exist
 os.makedirs(DECKS_DIR, exist_ok=True)
 
-# Initialize an empty users.json file if it doesn't exist
+# Initialize users.json if it doesn't exist
 if not USERS_FILE.exists():
     with open(USERS_FILE, "w") as file:
         json.dump({}, file)
 
-# 💬 Load/save user credentials
-# Reads all registered users
-def load_users():
-    with open(USERS_FILE, "r") as file:
-        return json.load(file)
+# === Utility Functions ===
 
-# Saves the current state of user credentials
-def save_users(users):
+def mana_symbol_to_filename(symbol: str) -> str:
+    """Convert mana symbol to corresponding filename."""
+    if "/" in symbol:
+        return symbol.replace("/", "").upper()
+    elif symbol.isdigit():
+        return symbol
+    elif symbol.upper() in {"X", "Y", "Z"}:
+        return f"C_{symbol.upper()}"
+    return symbol.upper()
+
+# === User Management ===
+
+def load_users() -> dict:
+    """Load user credentials from JSON file."""
+    try:
+        with open(USERS_FILE, "r") as file:
+            return json.load(file)
+    except json.JSONDecodeError:
+        return {}
+
+def save_users(users: dict) -> None:
+    """Save user credentials to JSON file."""
     with open(USERS_FILE, "w") as file:
         json.dump(users, file)
 
-# 💬 Each user's decks are stored in a JSON dict: {deck_name: [cards]}
+# === Deck Management ===
 
-# Returns the path to a user's deck file
-def get_deck_file(username):
-    return os.path.join(DECKS_DIR, f"{username}.json")
+def get_deck_file(username: str) -> pathlib.Path:
+    """Return the deck file path for a given user."""
+    return DECKS_DIR / f"{username}.json"
 
-# Loads all decks for a given user
-# If old format (list) is found, it converts to dict and saves
-def load_decks(username):
+def load_decks(username: str) -> dict:
+    """Load all decks for a given user. Auto-upgrade old formats if needed."""
     file_path = get_deck_file(username)
     try:
         with open(file_path, "r") as file:
             decks = json.load(file)
-            if isinstance(decks, list):  # legacy support
+            if isinstance(decks, list):
                 decks = {name: [] for name in decks}
                 save_decks(username, decks)
             return decks
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-# Saves all decks for a user
-# Format: {deck_name: [card1, card2, ...]}
-def save_decks(username, decks):
+def save_decks(username: str, decks: dict) -> None:
+    """Save all decks of a user to file."""
     with open(get_deck_file(username), "w") as file:
         json.dump(decks, file)
 
-# 💬 Get all cards in one deck
-def get_deck_cards(username, deck_name):
+def get_deck_cards(username: str, deck_name: str) -> list:
+    """Get all cards from a specific deck."""
     decks = load_decks(username)
     if isinstance(decks.get(deck_name), dict):
         return decks[deck_name].get("cards", [])
     return decks.get(deck_name, [])
 
-# 💬 Add a card to a deck if it's not already in it
-
-def add_card_to_deck(username, deck_name, card_name):
+def add_card_to_deck(username: str, deck_name: str, card_name: str) -> None:
+    """Add a card to a deck if it is not already present."""
     decks = load_decks(username)
     decks.setdefault(deck_name, {"cards": [], "commander": [], "updated_at": None})
 
-    # Zoek volledige kaart in database
-    cards_db = get_all_cards()
-    match = next((c for c in cards_db if c.get("name") == card_name), None)
+    match = find_card_by_name(card_name)
     if not match:
         return
 
-    # Vermijd duplicaten
-    if all(c.get("name") != card_name for c in decks[deck_name]["cards"]):
+    existing_names = {c.get("name") for c in decks[deck_name]["cards"]}
+    if card_name not in existing_names:
         decks[deck_name]["cards"].append(match)
         decks[deck_name]["updated_at"] = datetime.utcnow().isoformat()
         save_decks(username, decks)
 
-# utils.py
+# === Database Access ===
+
 _password = os.environ.get("DB_PASSWORD")
 _db = DBManager(dbname="mtgbase", user="postgres", password=_password)
 
 def get_all_cards() -> list[dict]:
-    # Get only selected card info for the UI
-    return _db.get_selected_card_data()
+    """Fetch one version per card name from the database."""
+    return _db.get_cards_by_name("")  # Empty search returns all distinct names
 
-from shiny import ui
+def find_card_by_name(name: str) -> dict | None:
+    """Find a single unique card by name using DB directly."""
+    return _db.get_cards_by_name(name)[0] if _db.get_cards_by_name(name) else None
 
-from shiny import ui
 
-def render_mana_cost(mana_cost_str):
+# === UI Rendering ===
+
+def render_mana_cost(mana_cost_str: str):
+    """Render mana cost string into icon images."""
     if not mana_cost_str:
         return ""
+
     parts = mana_cost_str.replace("{", "").split("}")
-
-    icons = []
-
-    for part in parts:
-        if not part:
-            continue
-
-        # Hybride mana: {W/U} → WU.svg
-        if "/" in part:
-            icons.append(part.replace("/", "").upper())
-
-        # Numeriek mana: {0}–{20} → gebruik direct 0.svg, 1.svg, ...
-        elif part.isdigit():
-            icons.append(part)  # toon bv. "5.svg"
-
-        # X/Y/Z → als C_X.svg
-        elif part.upper() in {"X", "Y", "Z"}:
-            icons.append(f"C_{part.upper()}")
-
-        # Alles standaard: bv. W, U, B, R, G, C
-        else:
-            icons.append(part.upper())
+    icons = [mana_symbol_to_filename(part) for part in parts if part]
 
     return ui.span(*[
         ui.img(
@@ -134,41 +131,33 @@ def render_mana_cost(mana_cost_str):
             height="16px",
             style="vertical-align: middle; margin-right: 2px;",
             title=symbol
-        )
-        for symbol in icons
+        ) for symbol in icons
     ])
 
-def render_text_with_icons(text):
+def render_text_with_icons(text: str):
+    """Replace mana symbols in card text with corresponding icons."""
     if not text:
         return ""
 
-    # Fix common encoding issues
     text = (
-        text.replace("â€”", "—")  # em dash
-            .replace("â€™", "’")  # apostrophe
-            .replace("\\n", "\n")  # literal "\n" to newline
+        text.replace("â€”", "—")
+            .replace("â€™", "’")
+            .replace("\\n", "\n")
             .replace("\n", "<br>")
-            .replace("â€¢", "*")# actual linebreaks to HTML
+            .replace("â€¢", "*")
             .replace("âˆ’", "-")
     )
 
     def replace_symbol(match):
         symbol = match.group(1)
-        if "/" in symbol:
-            filename = symbol.replace("/", "").upper()
-        elif symbol.isdigit():
-            filename = symbol
-        elif symbol.upper() in {"X", "Y", "Z"}:
-            filename = f"C_{symbol.upper()}"
-        else:
-            filename = symbol.upper()
-
+        filename = mana_symbol_to_filename(symbol)
         return f"<img src='/icons/{filename}.svg' title='{symbol}' height='16px' style='vertical-align: middle; margin-right: 2px;'/>"
 
     html = re.sub(r"\{([^}]+)\}", replace_symbol, text)
     return ui.HTML(html)
 
-def render_card_list(cards, add_button_class="add-card-btn"):
+def render_card_list(cards: list, add_button_class: str = "add-card-btn"):
+    """Render an HTML table of cards with add buttons."""
     headers = ui.tags.tr(
         ui.tags.th("Add"),
         ui.tags.th("Name"),
@@ -186,8 +175,7 @@ def render_card_list(cards, add_button_class="add-card-btn"):
             ui.tags.td(str(int(card.get("manavalue"))) if card.get("manavalue") is not None else ""),
             ui.tags.td(" ".join((card.get("supertypes") or []) + (card.get("types") or []))),
             ui.tags.td(render_text_with_icons(card.get("text"))),
-        )
-        for card in cards
+        ) for card in cards
     ]
 
     return ui.tags.table(
@@ -195,10 +183,9 @@ def render_card_list(cards, add_button_class="add-card-btn"):
         headers,
         *rows
     )
-
-def find_card_by_name(name):
-    cards = get_all_cards()
-    for card in cards:
-        if card["name"].lower() == name.lower():
-            return card
-    return None
+def is_basic_land(card):
+    return (
+        "Land" in (card.get("types") or []) and
+        "Basic" in (card.get("supertypes") or []) and
+        card.get("name") in {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
+    )
