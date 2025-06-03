@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from dbmanager import DBManager
 from shiny import ui
+import glob
 
 # 💬 File and folder paths
 # BASE_DIR points to the folder containing this file
@@ -52,8 +53,18 @@ def load_decks(username):
         with open(file_path, "r") as file:
             decks = json.load(file)
             if isinstance(decks, list):  # legacy support
-                decks = {name: [] for name in decks}
+                #decks = {name: [] for name in decks}
+                decks = {name: {"cards": [], "commander": [], "updated_at": None, "shared": False} for name in decks}
                 save_decks(username, decks)
+            else:
+                # Ensure every deck dict contains the 'shared' parameter (migration for old files)
+                changed = False
+                for deck in decks.values():
+                    if isinstance(deck, dict) and "shared" not in deck:
+                        deck["shared"] = False
+                        changed = True
+                if changed:
+                    save_decks(username, decks)
             return decks
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
@@ -61,8 +72,12 @@ def load_decks(username):
 # Saves all decks for a user
 # Format: {deck_name: [card1, card2, ...]}
 def save_decks(username, decks):
+    for deck in decks.values():
+        if isinstance(deck, dict) and "shared" not in deck:
+            deck["shared"] = False
     with open(get_deck_file(username), "w") as file:
         json.dump(decks, file)
+
 
 # 💬 Get all cards in one deck
 def get_deck_cards(username, deck_name):
@@ -75,7 +90,7 @@ def get_deck_cards(username, deck_name):
 
 def add_card_to_deck(username, deck_name, card_name):
     decks = load_decks(username)
-    decks.setdefault(deck_name, {"cards": [], "commander": [], "updated_at": None})
+    decks.setdefault(deck_name, {"cards": [], "commander": [], "updated_at": None, "shared": False})
 
     # Zoek volledige kaart in database
     cards_db = get_all_cards()
@@ -168,6 +183,14 @@ def render_text_with_icons(text):
     html = re.sub(r"\{([^}]+)\}", replace_symbol, text)
     return ui.HTML(html)
 
+def to_list(x):
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return x
+    return [x]
+
+
 def render_card_list(cards, add_button_class="add-card-btn"):
     headers = ui.tags.tr(
         ui.tags.th("Add"),
@@ -184,7 +207,8 @@ def render_card_list(cards, add_button_class="add-card-btn"):
             ),
             ui.tags.td(card.get("name") or ""),
             ui.tags.td(str(int(card.get("manavalue"))) if card.get("manavalue") is not None else ""),
-            ui.tags.td(" ".join((card.get("supertypes") or []) + (card.get("types") or []))),
+            #ui.tags.td(" ".join((card.get("supertypes") or []) + (card.get("types") or []))),
+            ui.tags.td(" ".join(to_list(card.get("supertypes")) + to_list(card.get("types")))),
             ui.tags.td(render_text_with_icons(card.get("text"))),
         )
         for card in cards
@@ -202,3 +226,28 @@ def find_card_by_name(name):
         if card["name"].lower() == name.lower():
             return card
     return None
+
+
+def get_all_shared_decks(current_username=None):
+    shared_decks = []
+    for deck_file in glob.glob(str(DECKS_DIR / "*.json")):
+        # extract username from filename
+        username = pathlib.Path(deck_file).stem
+        if username == current_username:
+            continue  # skip current user's decks; they see those already, unless you want to also show their own shares
+
+        try:
+            with open(deck_file, "r") as f:
+                user_decks = json.load(f)
+                for deck_name, deck_obj in user_decks.items():
+                    if isinstance(deck_obj, dict) and deck_obj.get("shared", False):
+                        shared_decks.append({
+                            "username": username,
+                            "deck_name": deck_name,
+                            "cards": deck_obj.get("cards", []),
+                            "commander": deck_obj.get("commander", []),
+                            "updated_at": deck_obj.get("updated_at"),
+                        })
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+    return shared_decks
