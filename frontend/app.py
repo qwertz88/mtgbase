@@ -1,19 +1,18 @@
 from shiny import App
-from ui import app_ui         # 🧩 UI components: login/register screen, main app layout, etc.
-from logic import server      # ⚙️ Server logic: handles user interaction, state changes, etc.
-import pathlib                # 📁 For creating paths to directories/files reliably
+from ui import app_ui           # 💬 The layout of your app (login screen, register screen, etc.)
+from logic import server        # 💬 The logic handling user actions like login, logout, etc.
+import pathlib                  # ✅ Needed to resolve relative icon folder path
 
-# 📁 Path to the folder containing icons (relative to this file)
-icon_dir = pathlib.Path(__file__).resolve().parent / "icons"
 
-# 🚀 Create and configure the Shiny app with static route for icons
+# ✅ Define the static path to your icons folder
+icon_dir = pathlib.Path(__file__).parent / "icons"
+
+# ✅ Mount /icons as static route (fix: route must start with "/")
 app = App(app_ui, server, static_assets={"/icons": icon_dir})
 
-# 🐍 Run the app directly using `python app.py` (e.g., for development in PyCharm or CLI)
+# 💬 Allows you to run the app directly with `python app.py` (e.g. from PyCharm)
 if __name__ == "__main__":
     from shiny._main import main
     import sys
-
-    # 🎯 Simulate command-line arguments for shiny CLI runner
     sys.argv = ["shiny", "run", "--reload", __file__]
     main()

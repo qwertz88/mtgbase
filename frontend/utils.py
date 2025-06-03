@@ -183,3 +183,9 @@ def render_card_list(cards: list, add_button_class: str = "add-card-btn"):
         headers,
         *rows
     )
+def is_basic_land(card):
+    return (
+        "Land" in (card.get("types") or []) and
+        "Basic" in (card.get("supertypes") or []) and
+        card.get("name") in {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
+    )

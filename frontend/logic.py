@@ -5,7 +5,7 @@ from layout import Page
 from ui import login_ui, register_ui, logged_in_ui, deck_view_ui, card_search_ui
 from utils import (
     load_users, save_users,
-    load_decks, save_decks,
+    load_decks, save_decks, is_basic_land,
     get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons
 )
 from state import session_user, ui_mode, active_deck, card_update_counter, choose_commander_stage,commander_search_name
@@ -293,23 +293,15 @@ def server(input, output, session):
     @reactive.effect
     @reactive.event(input.add_card_btn)
     async def handle_add_card_and_show_list():
-        username, deck = session_user.get(), active_deck.get()
+        # Get the name the user typed
         card = get_clean_input(input, "card_name")
 
-        choose_commander_stage.set("closed")  # 👈 Close commander list first
+        # Close any commander search state
+        choose_commander_stage.set("closed")
+
+        # Update the search input and show search results
         search_name_value.set(card)
         show_card_search.set(True)
-
-        if username and deck and card:
-            add_card_to_deck(username, deck, card)
-
-            # Update updated_at manually
-            decks = load_decks(username)
-            if deck in decks:
-                decks[deck]["updated_at"] = datetime.utcnow().isoformat()
-                save_decks(username, decks)
-
-            trigger_update()
 
     # Toggle favorite on decks
     @reactive.effect
@@ -502,24 +494,22 @@ def server(input, output, session):
     @output
     @render.ui
     def deck_card_list():
-        deck_data = current_deck_data()  # 👈 Reactively tracks deck + card changes
+        from collections import defaultdict, Counter
+
+        deck_data = current_deck_data()
         if not deck_data:
             return ui.div()
 
         all_cards = deck_data.get("cards", [])
         commander_cards = deck_data.get("commander", [])
 
-        from collections import defaultdict
         grouped = defaultdict(list)
-
         for card in commander_cards:
             grouped["commander"].append(card)
-
         for card in all_cards:
             card_type = get_card_type(card, [c["name"] for c in commander_cards])
             grouped[card_type].append(card)
 
-        # Sort each group by mana value (cmc)
         for tag in grouped:
             grouped[tag] = sorted(grouped[tag], key=lambda c: c.get("cmc") or c.get("manavalue") or 0)
 
@@ -529,34 +519,29 @@ def server(input, output, session):
             if not cards:
                 continue
 
-            sections.append(ui.h4(f"{tag.capitalize()} ({len(cards)})"))
-            sections.append(
-                ui.tags.ul(*[
-                    ui.tags.li(
-                        ui.span(card["name"] + " "),
-                        ui.HTML(render_mana_cost(card.get("manacost"))),
-                        ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
-                    )
-                    for card in cards
-                ])
-            )
+            name_counter = Counter(card["name"] for card in cards)
+            unique_cards = {}
+            for card in cards:
+                if card["name"] not in unique_cards:
+                    unique_cards[card["name"]] = card
 
-        return ui.div(
-            *[
-                ui.div(  # Each section is a grid item
+            sections.append(
+                ui.div(
                     ui.h4(f"{tag.capitalize()} ({len(cards)})"),
                     ui.tags.ul(*[
                         ui.tags.li(
-                            ui.span(card["name"] + " "),
+                            ui.span(f"{name_counter[name]}× {name} "),
                             ui.HTML(render_mana_cost(card.get("manacost"))),
-                            ui.a("❌", href="#", class_="delete-card", **{"data-card": card["name"]})
+                            ui.a("❌", href="#", class_="delete-card", **{"data-card": name})
                         )
-                        for card in cards
-                    ])
+                        for name, card in unique_cards.items()
+                    ]),
+                    style="display: flex; flex-direction: column;"
                 )
-                for tag in TAG_ORDER
-                if (cards := grouped.get(tag))
-            ],
+            )
+
+        return ui.div(
+            *sections,
             style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; align-items: start;"
         )
 
@@ -574,21 +559,23 @@ def server(input, output, session):
             decks = load_decks(session_user.get())
             deck_data = decks[deck]
 
-            # Duplicate check
-            if any(c.get("name") == card_name for c in deck_data.get("cards", [])):
+            # Haal de kaartinfo op uit de DB
+            cards_db = get_all_cards()
+            match = next((c for c in cards_db if c.get("name") == card_name), None)
+            if not match:
+                return
+
+            # Alleen check op duplicaten als het géén basic land is
+            if not is_basic_land(match) and any(c.get("name") == card_name for c in deck_data.get("cards", [])):
                 card_error_val.set("⚠️ This card is already in your deck.")
                 return
             else:
                 card_error_val.set("")
 
-            # Get full card data
-            cards_db = get_all_cards()
-            match = next((c for c in cards_db if c.get("name") == card_name), None)
-
-            if match:
-                deck_data["cards"].append(match)
-                save_decks(session_user.get(), decks)
-                card_update_counter.set(card_update_counter.get() + 1)
+            # Voeg toe
+            deck_data["cards"].append(match)
+            save_decks(session_user.get(), decks)
+            card_update_counter.set(card_update_counter.get() + 1)
 
     @output
     @render.text
