@@ -1,6 +1,7 @@
 from shiny import ui
 from state import search_name_value
-from utils import load_decks  # bovenaan als nodig
+import datetime
+from utils import load_decks, render_text_with_icons, render_mana_cost, to_list  # bovenaan als nodig
 from state import session_user
 
 # --- Login page layout ---
@@ -93,6 +94,72 @@ def logged_in_ui(username):
         ui.hr(),
         ui.input_text("deck_name", "New Deck Name"),
         ui.input_action_button("create_deck", "Create Deck"),
+        ui.hr(),
+        ui.h3("Shared Decks from Other Users"),
+        ui.output_ui("shared_decks_list"),
+    )
+
+def shared_deck_view_ui(owner, deck_name, deck_data):
+    # Count cards
+    card_count = len(deck_data.get("cards", []))
+
+    # Extract commander info
+    commanders = deck_data.get("commander", [])
+    commander_section = ""
+    if commanders:
+        commander_names = [cmd.get("name", "Unknown") for cmd in commanders]
+        commander_section = ui.div(
+            ui.h4("Commander:"),
+            ui.p(", ".join(commander_names)),
+            style="margin-bottom: 1rem;"
+        )
+
+    # Format updated date
+    updated_at = deck_data.get("updated_at")
+    updated_text = ""
+    if updated_at:
+        try:
+            updated_date = datetime.fromisoformat(updated_at)
+            updated_text = f"Last updated: {updated_date.strftime('%Y-%m-%d %H:%M')}"
+        except:
+            # Handle date parsing errors
+            updated_text = "Last updated: Unknown"
+
+    # Create card list
+    card_rows = []
+    for card in deck_data.get("cards", []):
+        card_rows.append(
+            ui.tags.tr(
+                ui.tags.td(card.get("name", "")),
+                ui.tags.td(render_mana_cost(card.get("manaCost", ""))),
+                ui.tags.td(" ".join(to_list(card.get("supertypes")) + to_list(card.get("types")))),
+                ui.tags.td(render_text_with_icons(card.get("text", "")))
+            )
+        )
+
+    card_table = ui.tags.table(
+        {"class": "table"},
+        ui.tags.thead(
+            ui.tags.tr(
+                ui.tags.th("Name"),
+                ui.tags.th("Mana Cost"),
+                ui.tags.th("Type"),
+                ui.tags.th("Text")
+            )
+        ),
+        ui.tags.tbody(*card_rows)
+    )
+
+    return ui.div(
+        ui.div(
+            ui.h2(f"{deck_name} (by {owner})"),
+            ui.p(f"{card_count} cards • {updated_text}"),
+            ui.input_action_button("back_from_shared_deck", "← Back to Deck List"),
+            style="margin-bottom: 1.5rem;"
+        ),
+        commander_section,
+        ui.h4("Cards:"),
+        card_table
     )
 
 # --- Single deck view with card adding and back button ---
@@ -206,6 +273,13 @@ app_ui = ui.page_fluid(
                 const cardName = e.target.dataset.card;
                 Shiny.setInputValue('commander_choice', cardName, {priority: 'event'});
             }
+            
+            if (e.target.classList.contains('open-shared-deck')) {
+                const deckName = e.target.dataset.deck;
+                const username = e.target.dataset.username;
+                Shiny.setInputValue('open_shared_deck', {username: username, deck: deckName}, {priority: 'event'});
+            }
+
         });
 
         Shiny.addCustomMessageHandler('clear_card_input', function(_) {
