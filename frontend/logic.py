@@ -6,7 +6,8 @@ from ui import login_ui, register_ui, logged_in_ui, deck_view_ui, card_search_ui
 from utils import (
     load_users, save_users,
     load_decks, save_decks,
-    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons, render_card_list, find_card_by_name
+    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons, render_card_list, find_card_by_name,
+    get_all_shared_decks
 )
 from state import session_user, ui_mode, active_deck, card_update_counter, choose_commander_stage,commander_search_name
 from mgtbase.hash import hash_pw
@@ -182,6 +183,76 @@ def server(input, output, session):
                 *rows
             )
         )
+
+    @output
+    @render.ui
+    def shared_decks_list():
+        # Get current username
+        username = session_user.get()
+        if not username:
+            return ui.div()
+
+        # Get all shared decks from other users
+        shared_decks = get_all_shared_decks(current_username=username)
+
+        if not shared_decks:
+            return ui.p("No shared decks available at this time.")
+
+        # Create a list of deck items
+        deck_items = []
+        for deck in shared_decks:
+            # Count cards in the deck
+            card_count = len(deck["cards"])
+            commander_names = [cmd.get("name", "Unknown") for cmd in deck.get("commander", [])]
+            commander_text = f" • Commander: {', '.join(commander_names)}" if commander_names else ""
+
+            deck_items.append(
+                ui.div(
+                    ui.div(
+                        ui.tags.strong(f"{deck['deck_name']} (by {deck['username']})"),
+                        ui.p(f"{card_count} cards{commander_text}"),
+                        # The "View Deck" button has been removed from here
+                        style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;"
+                    )
+                )
+            )
+
+        return ui.div(*deck_items)
+
+    @reactive.effect
+    @reactive.event(input.open_shared_deck)
+    def _():
+        # Get the shared deck info
+        shared_info = input.open_shared_deck()
+        if not shared_info:
+            return
+
+        owner_username = shared_info.get("username")
+        deck_name = shared_info.get("deck")
+
+        if not owner_username or not deck_name:
+            return
+
+        # Load the shared deck
+        owner_decks = load_decks(owner_username)
+        if deck_name not in owner_decks:
+            return
+
+        # Set a special mode for viewing shared decks (read-only)
+        ui_mode.set("view_shared_deck")
+
+        # Store the shared deck info for rendering
+        session.userData.shared_deck_info = {
+            "owner": owner_username,
+            "name": deck_name,
+            "data": owner_decks[deck_name]
+        }
+
+    @reactive.effect
+    @reactive.event(input.back_from_shared_deck)
+    def _():
+        ui_mode.set("logged_in")
+        session.userData.shared_deck_info = None
 
     # Mode switch: login <-> register
     @reactive.effect
