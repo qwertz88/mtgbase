@@ -6,9 +6,10 @@ from ui import login_ui, register_ui, logged_in_ui, deck_view_ui, card_search_ui
 from utils import (
     load_users, save_users,
     load_decks, save_decks,
-    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons, render_card_list, find_card_by_name
+    get_all_cards, add_card_to_deck, render_mana_cost, render_text_with_icons
 )
 from state import session_user, ui_mode, active_deck, card_update_counter, choose_commander_stage,commander_search_name
+from hash import hash_pw
 
 # 🧠 Reactive values to show login/register feedback
 login_msg_val = reactive.Value("")
@@ -199,7 +200,7 @@ def server(input, output, session):
     async def handle_login():
         username = get_clean_input(input, "username")
         password = get_clean_input(input, "password")
-        if username in USERS and USERS[username] == password:
+        if username in USERS and USERS[username] == hash_pw(password):
             session_user.set(username)
             active_deck.set(None)
         else:
@@ -225,7 +226,7 @@ def server(input, output, session):
             register_msg_val.set("❌ Username already exists.")
             return
 
-        USERS[new_user] = new_pass
+        USERS[new_user] = hash_pw(new_pass)
         save_users(USERS)
         save_decks(new_user, {})
         session_user.set(new_user)

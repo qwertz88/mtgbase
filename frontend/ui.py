@@ -1,7 +1,5 @@
 from shiny import ui
 from state import search_name_value
-from utils import load_decks  # bovenaan als nodig
-from state import session_user
 
 # --- Login page layout ---
 login_ui = ui.div(
